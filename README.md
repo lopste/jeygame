@@ -20,6 +20,8 @@ You may use this with whatever purpose according to the liscense, except for tra
   
 - Canvas shorthands
 - Canvas 2d rendering
+- Sprites
+- Easily modify sprite position
 - Easily modify sprite appearances
 - Easily bind inputs 
 - You tell the engine what to do, not the other way around.
