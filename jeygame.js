@@ -1,225 +1,296 @@
-var cnv;
-var ctx;
+const Jeygame = {};
+const JeygameInternals = {};
 
-console.group("%c powered by %cjeygame%c.js", "font-size: 15px;","font-size: 25px; color: rgb(0,150,255);","font-size:10px;");
-console.log("%ca JavaScript game engine","font-size:10px;");
-console.log("%chttps://github.com/lopste/quickgame","color: lightblue; font-size: 10px;");
-console.log("%cthis counts as credit for the engine btw","font-size: 5px;"); // this counts as credit for the engine btw
-console.groupEnd();
-
-class instance {
-    constructor(name="untitled") {
-        this.name = name;
-        this.data = {};
-        this.func = {};
+JeygameInternals.Instances = {};
+JeygameInternals.Instances.Instance = class {
+    constructor(sealed = true) {
+        this.name = "Instance";
+        this.attributes = {};
+        this.parent = undefined;
+        this.children = [];
+        if(sealed) {Object.seal(this);}
     }
-    get type() {
-        return {
-            "id": 0,
-            "name": "instance"
-        };
+    clearChildren() {
+        for(let i = 0; i < this.children.length; i++) {
+            this.children[i].destroy();
+        }
+    }
+    getChildren() {return this.children;}
+    getChildByName(name) {
+        let chosenChild;
+        for(let i = 0; i < this.children.length; i++) {
+            if(this.children[i].name == name) {
+                return this.children[i];
+            }
+        }
+        return null;
+    }
+    addChild(child) {
+        if(child instanceof JeygameInternals.Instances.Instance) {
+            if(!(Object.isFrozen(child) || Object.isFrozen(this) && child.parent != this)) {
+                this.children.push(child);
+                child.parent = this;
+            } else {
+                console.warn("Child/Parent is frozen or destroyed!");
+            }
+        }
+    }
+    destroy(timeout = 0) {
+        if(timeout) {
+            setTimeout(() => {
+                this.clearChildren();
+                if(this.parent) {
+                    let thisIndex = this.parent.children.indexOf(this);
+                    this.parent.children.splice(thisIndex,1);
+                }
+                this.name = null;
+                this.parent = null;
+                Object.freeze(this);
+                Object.freeze(this.attributes);
+            }, timeout)
+        } else {
+            this.clearChildren();
+            if(this.parent) {
+                let thisIndex = this.parent.children.indexOf(this);
+                this.parent.children.splice(thisIndex,1);
+            }
+            this.name = null;
+            this.parent = null;
+            Object.freeze(this);
+            Object.freeze(this.attributes);
+        }
+    }
+    setAttribute(attr, value) {
+        this.attributes[attr] = value;
+    }
+    getAttribute(attr) {
+        return this.attributes[attr];
+    }
+    removeAttribute(attr) {
+        delete this.attributes[attr];
     }
 }
 
-// Classes
-class sprite extends instance {
-    constructor(name="untitled") {
-        super(name);
-        this.position = {
-            "x": 0,
-            "y": 0
-        };
-        this.data.beingDrawn = false;
-        this.drawRoutine = function(cc, x, y) {
-            cc.drawRect(x, y, 10, 10);
-        }
-        ;
-        this.game = null;
+JeygameInternals.Instances.GameController = class extends JeygameInternals.Instances.Instance {
+    constructor() {
+        super(false);
+        this.name = "Game";
+        this.children = [];
+        this.renderBinds = {};
+        this.renderFrame = 0;
+        this.gameInfo = {"gameType": "canvas2d"};
+
+        this.renderContext = null;
+        let renderInterval = null;
+        Object.defineProperty(this, "currentRenderInterval", {
+            get() {
+                return renderInterval;
+            },
+            set(value) {
+                clearInterval(renderInterval);
+                renderInterval = value;
+            }
+        })
+        Object.seal(this);
     }
-    get type() {
-        return {
-            "id": 3,
-            "name": "sprite"
-        };
+
+    bindToRender(id, func) {
+        this.renderBinds[id] = {"callback": func};
     }
-    moveTo(pos) {
-        if ((pos.x != undefined) && (pos.y != undefined)) {
-            this.position = pos;
-        } else if (pos.x != undefined) {
-            this.position.x = pos.x
-        } else if (pos.y != undefined) {
-            this.position.y = pos.y
+
+    unbindFromRender(id) {
+        delete this.renderBinds[id];
+    }
+
+    setRenderingCanvas(canvas) {
+        if(canvas instanceof HTMLCanvasElement) {
+            this.renderContext = Jeygame.RenderContext(canvas);
         } else {
-            Error("Invalid Position")
+            throw new Error("Tried to set rendering canvas to non-canvas object");
         }
     }
-    moveBy(pos) {
-        if ((pos.x != undefined) && (pos.y != undefined)) {
-            this.position.x += pos.x;
-            this.position.y += pos.y;
-        } else if (pos.x != undefined) {
-            this.position.x += pos.x
-        } else if (pos.y != undefined) {
-            this.position.y += pos.y
-        } else {
-            Error("Invalid Position")
+
+    clearRenderInterval(wipe = false) {
+        this.currentRenderInterval = null;
+        this.renderFrame = 0;
+
+        if(this.renderContext && wipe) {
+            this.renderContext.ctx.clearRect(0,0, this.renderContext.canvas.width, this.renderContext.canvas.height);
         }
     }
-    toggleDrawing(value=null) {
-        if (value === null) {
-            if (this.data.beingDrawn === false) {
-                this.data.beingDrawn = true
-            } else {
-                this.data.beingDrawn = false
+[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]
+    setRenderInterval(refresh) {
+        this.currentRenderInterval = setInterval(() => {this.render()}, refresh);
+    }
+
+    resizeCanvas(size) {
+        if(size instanceof JeygameInternals.Datatypes.Vector2 && this.renderContext) {
+            this.renderContext.canvas.width = size.x;
+            this.renderContext.canvas.height = size.y;
+        }   
+    }
+
+    render() {
+        if(this.renderContext) {
+            this.renderFrame += 1;
+            Object.values(this.renderBinds).forEach(call => {
+                call.callback();
+            });
+            let ctx = this.renderContext.ctx
+            ctx.clearRect(0,0, ctx.canvas.width, ctx.canvas.height)
+            for (let i = 0; i < this.children.length; i++) {
+                let cs = this.children[i];
+                if(cs instanceof JeygameInternals.Instances.Sprite) {
+                    if(cs.renderer && !(cs.hidden)) {
+                        cs.renderer.renderRoutine(cs, ctx, cs.position, cs.rotation);
+                    }
+                }
             }
         } else {
-            this.data.beingDrawn = value
-        }
-    }
-    addToGame(game) {
-        game.sprites.push(this);
-        this.game = game;
-    }
-}
-
-class inputController extends instance {
-    constructor(name="untitled") {
-        super(name);
-        this.bindedFunctions = [];
-    }
-    bindFunction(arr) {
-        arr[0].addEventListener(arr[1], arr[2]);
-    }
-	 unbindFunction(arr) {
-        arr[0].removeEventListener(arr[1], arr[2]);
-    }
-    get type() {
-        return {
-            "id": 4,
-            "name": "inputController"
+            console.warn("Jeygame: No rendering context defined!");
         }
     }
 }
 
-class canvasController extends instance {
-    constructor(canvas, name="untitled") {
-        super(name);
+JeygameInternals.Instances.Sprite = class extends JeygameInternals.Instances.Instance {
+    constructor() {
+        super(false);
+        this.name = "Sprite"
+        this.position = Jeygame.Vector2(0,0);
+        this.size = Jeygame.Vector2(10,10)
+        this.rotation = 0;
+        this.renderer = undefined;
+        this.hidden = false;
+        Object.seal(this)
+        this.setRenderer(Jeygame.make("SpriteRenderer"));
+    }
+
+    setRenderer(renderer) {
+        if(renderer instanceof JeygameInternals.Instances.SpriteRenderer) {
+            this.renderer && !(this.renderer == renderer) && this.renderer.destroy();
+            this.renderer = renderer;
+            this.addChild(renderer);
+        } else {
+            console.warn("Invalid renderer!");
+            this.renderer && this.renderer.destroy();
+            this.renderer = null;
+        }
+    }
+
+    removeRenderer() {
+        if(this.renderer) {
+            !(Object.isFrozen(this.renderer)) && this.renderer.destroy();
+            this.renderer = null;
+        }
+    }
+}
+
+JeygameInternals.Instances.SpriteRenderer = class extends JeygameInternals.Instances.Instance {
+    constructor(sealed = true) {
+        super(false);
+        this.name = "SpriteRenderer";
+        this.renderRoutine = (spr, ctx, pos, rot) => {
+            ctx.save();
+            ctx.fillStyle = "black";
+
+            ctx.translate(pos.x + spr.size.x / 2, pos.y + spr.size.y / 2);
+            ctx.rotate(rot * Math.PI / 180);
+            ctx.translate(-(pos.x + spr.size.x / 2), -(pos.y + spr.size.y / 2));
+
+            ctx.fillRect(pos.x,pos.y,spr.size.x,spr.size.y);
+            ctx.restore();
+        };
+
+        if(sealed) {
+            Object.seal(this);
+        }
+    }
+}
+
+JeygameInternals.Instances.SpriteRendererImage = class extends JeygameInternals.Instances.SpriteRenderer {
+    constructor() {
+        super(false);
+        this.name = "SpriteRendererImage";
+
+        let defaultImage = new Image();
+        this.imageSettings = {
+            "image": defaultImage,
+            "cropPos": Jeygame.Vector2(0,0),
+            "cropSize": Jeygame.Vector2(255,255)
+        }
+
+        this.renderRoutine = (spr, ctx, pos, rot) => {
+            let ren = spr.renderer;
+            let renSettings = ren.imageSettings
+            ctx.save();
+            ctx.fillStyle = "black";
+
+            ctx.translate(pos.x + spr.size.x / 2, pos.y + spr.size.y / 2);
+            ctx.rotate(rot * Math.PI / 180);
+            ctx.translate(-(pos.x + spr.size.x / 2), -(pos.y + spr.size.y / 2));
+            
+            ctx.drawImage(renSettings.image, renSettings.cropPos.x, renSettings.cropPos.y, renSettings.cropSize.x,renSettings.cropSize.y, pos.x, pos.y, spr.size.x, spr.size.y);
+            ctx.restore();
+        }
+
+        Object.seal(this);
+    }
+
+    setImage(url) {
+        let newImage = new Image();
+        newImage.src = url;
+
+        this.imageSettings.image = newImage;
+    }
+}
+
+JeygameInternals.Datatypes = {}
+JeygameInternals.Datatypes.Vector2 = class {
+    constructor(x,y,mag) {
+        this.type = "Vector2";
+        this.x = x;
+        this.y = y;
+        this.magnitude = 0;
+        Object.seal(this);
+    }
+
+    valueOf() {
+        return [this.x,this.y];
+    }
+    toString() {
+        return `${this.x}, ${this.y}`;
+    }
+}
+JeygameInternals.Datatypes.RenderContext = class {
+    constructor(canvas) {
+        this.type = "RenderContext";
         this.canvas = canvas;
         this.ctx = canvas.getContext("2d");
-        this.game = null;
-    }
-    setStyle(style, type=1) {
-        switch (type) {
-        case 1:
-            this.ctx.fillStyle = style
-            break;
-        case 2:
-            this.ctx.strokeStyle = style
-            break;
-        case 3:
-            this.ctx.font = style;
-            break;
-        default:
-            this.ctx.fillStyle = style;
-            break;
-        }
-    }
-	 state(save) {
-	 	if (save) {this.ctx.save();} else {this.ctx.restore();}
-	 }
-	 setScale(x,y) {
-	 	this.ctx.scale(x,y);
-	 }
-	 setImageSmoothing(value=true,qual="low") {
-	 	this.ctx.imageSmoothingEnabled = value;
-		this.ctx.imageSmoothingQuality = qual;
-	 }
-    drawRect(x, y, width, height, fill=1) {
-        switch (fill) {
-        case 1:
-            this.ctx.fillRect(x, y, width, height);
-            break;
-        case 2:
-            this.ctx.strokeRect(x, y, width, height);
-            break;
-        case 3:
-            this.ctx.clearRect(x, y, width, height);
-            break;
-        default:
-            Error("Invalid Fill Statement");
-            break;
-        }
-    }
-    drawImageWithSlice(url, x, y, ow, oh, ix, iy, iw, ih) {
-        let imgToDraw = document.createElement("img");
-        imgToDraw.src = url;
-        this.ctx.drawImage(imgToDraw, x, y, ow, oh, ix, iy, iw, ih);
-        imgToDraw.remove();
-    }
-    drawImage(url, x, y) {
-        let imgToDraw = document.createElement("img");
-        imgToDraw.src = url;
-        ctx.drawImage(imgToDraw, x, y);
-        imgToDraw.remove();
-    }
-    drawText(text, x, y, fill=1, mw=undefined) {
-        switch (fill) {
-        case 1:
-            this.ctx.fillText(text, x, y, mw)
-            break;
-        case 2:
-            this.ctx.strokeText(text, x, y, mw)
-            break;
-        default:
-            break;
-        }
-    }
-    clearScreen() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-	 setCanvasStyle(style) {this.canvas.style = style}
-    addToGame(game) {
-        game.rendering.canvasController = this;
-    }
-    get type() {
-        return {
-            "id": 2,
-            "name": "canvasController"
-        };
+        Object.seal(this);
     }
 }
 
-class gameController extends instance {
-    constructor(name="untitled") {
-        super(name);
-        this.rendering = {
-            "FPS": 0,
-            "canvasController": null,
-            "camera": null
-        }
-        this.sprites = [];
-    }
-    get type() {
-        return {
-            "id": 1,
-            "name": "gameController"
-        };
-    }
-    render() {
-        this.rendering.canvasController.clearScreen();
-        for (let i = 0; i <= this.sprites.length; i++) {
-            if (this.sprites[i]) {
-                let cs = this.sprites[i]
-                cs.drawRoutine(this.rendering.canvasController, cs.position.x, cs.position.y);
+Jeygame.make = function(type, properties) {
+    if(JeygameInternals.Instances[type]) {
+        let newInstance = new JeygameInternals.Instances[type](true);
+        if(properties) {
+            for (const [property, value] of Object.entries(properties)) {
+                if(property && value) {
+                    newInstance[property] = value;
+                }
             }
         }
-    }
-    setRenderInterval(fps) {
-        setInterval(()=>this.render(), 1000 / fps);
+        return newInstance;
+    } else {
+        throw new Error("Invalid instance");
     }
 }
 
-// Controls
-function handleKey(e) {
-    console.log(e);
+Jeygame.Vector2 = function(x,y,mag = 0) {
+    let returnVector = new JeygameInternals.Datatypes.Vector2(x,y,mag);
+    return returnVector;
+}
+Jeygame.RenderContext = function(canvas) {
+    let context = new JeygameInternals.Datatypes.RenderContext(canvas);
+    return context;
 }
